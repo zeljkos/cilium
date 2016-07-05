@@ -20,16 +20,16 @@ type routerCommon struct {
 
 type RouterUI struct {
 	routerCommon
-	daemon *daemon.Daemon
+	daemon *backend.CiliumBackend
 }
 
 type RouterBackend struct {
 	routerCommon
-	daemon backend.CiliumBackend
+	daemon backend.DaemonBackend
 }
 
 // NewRouter creates and returns a new router for the given backend.
-func NewRouter(backend backend.CiliumBackend) RouterBackend {
+func NewRouter(backend backend.DaemonBackend) RouterBackend {
 	mRouter := mux.NewRouter().StrictSlash(true)
 	r := RouterBackend{routerCommon{mRouter, routes{}}, backend}
 	r.initRoutes()

@@ -2,6 +2,8 @@ package backend
 
 import (
 	"github.com/noironetworks/cilium-net/common/types"
+
+	"github.com/weaveworks/scope/report"
 )
 
 type bpfBackend interface {
@@ -37,6 +39,15 @@ type policyBackend interface {
 	PolicyDelete(path string) error
 	PolicyGet(path string) (*types.PolicyNode, error)
 	PolicyCanConsume(ctx *types.SearchContext) (*types.SearchContextReply, error)
+}
+
+type weaveScope interface {
+	WeaveScopeReport() (*report.Report, error)
+}
+
+type DaemonBackend interface {
+	weaveScope
+	CiliumBackend
 }
 
 type control interface {
