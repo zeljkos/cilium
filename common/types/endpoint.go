@@ -32,6 +32,7 @@ const (
 	OptionAllowToHost         = "AllowToHost"
 	OptionAllowToWorld        = "AllowToWorld"
 	OptionLearnTraffic        = "LearnTraffic"
+	LearningTimeoutSeconds    = 60
 )
 
 var (
@@ -78,8 +79,9 @@ var (
 	}
 
 	OptionSpecLearnTraffic = Option{
-		Define:      "LEARN_TRAFFIC",
-		Description: "Learn and add labels to the list of allowed labels",
+		Define: "LEARN_TRAFFIC",
+		Description: fmt.Sprintf("Learn and add labels to the list of allowed "+
+			"labels (Automatically disabled after %d seconds)", LearningTimeoutSeconds),
 	}
 
 	EndpointOptionLibrary = OptionLibrary{

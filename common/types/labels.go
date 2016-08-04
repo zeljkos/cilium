@@ -56,12 +56,14 @@ func (opl *OpLabels) GetDeletedLabels() Labels {
 type LearningLabel struct {
 	EndpointID uint16
 	Learn      bool
+	Started    time.Time
 }
 
 func NewLearningLabel(endpointID uint16, learn bool) *LearningLabel {
 	return &LearningLabel{
 		EndpointID: endpointID,
 		Learn:      learn,
+		Started:    time.Now(),
 	}
 }
 

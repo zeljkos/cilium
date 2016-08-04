@@ -15,6 +15,11 @@ import (
 	"github.com/noironetworks/cilium-net/common/types"
 )
 
+const (
+	cleanInterval   = time.Duration(30 * time.Second)
+	learningTimeout = time.Duration(types.LearningTimeoutSeconds * time.Second)
+)
+
 func (d *Daemon) receiveEvent(msg *bpf.PerfEventSample, cpu int) {
 	data := msg.DataDirect()
 	if data[0] == bpf.CILIUM_NOTIFY_DROP {
@@ -55,6 +60,7 @@ func (d *Daemon) EnableLearningTraffic() {
 	eventStopped := make(chan bool, 1)
 
 	go func() {
+		ticker := time.NewTicker(cleanInterval)
 		for {
 			select {
 			case lEP := <-d.endpointsLearningRegister:
@@ -64,9 +70,30 @@ func (d *Daemon) EnableLearningTraffic() {
 					if len(d.endpointsLearning) == 0 {
 						startChan <- true
 					}
+					log.Infof("Starting learning functionality for endpoint %d", lEP.EndpointID)
 					d.endpointsLearning[lEP.EndpointID] = lEP
 				} else {
-					delete(d.endpointsLearning, lEP.EndpointID)
+					if _, ok := d.endpointsLearning[lEP.EndpointID]; ok {
+						log.Infof("Stopping learning functionality for endpoint %d due to user action", lEP.EndpointID)
+						delete(d.endpointsLearning, lEP.EndpointID)
+					}
+					if len(d.endpointsLearning) == 0 {
+						stopChan1 <- true
+					}
+				}
+				d.endpointsLearningMU.Unlock()
+			case <-ticker.C:
+				d.endpointsLearningMU.Lock()
+				if len(d.endpointsLearning) != 0 {
+					for _, lEP := range d.endpointsLearning {
+						if lEP.Started.Add(learningTimeout).Before(time.Now()) {
+							log.Infof("Stopping learning functionality for endpoint %d due to timeout. (Learning was turn on for more than %d seconds)", lEP.EndpointID, types.LearningTimeoutSeconds)
+							if err := d.EndpointUpdate(lEP.EndpointID, types.OptionMap{types.OptionLearnTraffic: false}); err != nil {
+								log.Error("Error while stopping learning functionality for endpoint %d: %s", lEP.EndpointID, err)
+							}
+							delete(d.endpointsLearning, lEP.EndpointID)
+						}
+					}
 					if len(d.endpointsLearning) == 0 {
 						stopChan1 <- true
 					}
