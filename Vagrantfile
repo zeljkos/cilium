@@ -1,13 +1,6 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
-if ARGV.first == "up" && ENV['CILIUM_SCRIPT'] != 'true'
-    raise Vagrant::Errors::VagrantError.new, <<END
-Calling 'vagrant up' directly is not supported.  Instead, please run the following:
-  ./contrib/vagrant/start.sh [NUM_NODES]
-END
-end
-
 $bootstrap = <<SCRIPT
 chown -R vagrant:vagrant /home/vagrant/go
 sudo apt-get -y install socat curl jq realpath pv tmux
@@ -75,6 +68,65 @@ $node_nfs_base_ip = ENV['NODE_NFS_IP_BASE']
 if ENV['K8S'] then
     $k8stag="-k8s"
 end
+
+$client = <<SCRIPT
+ip -6 a a 2001:DB8:aaaa::1/48 dev eth1
+ip -6 r a f00d::c0a8:210d:0:0/96 via 2001:db8:aaaa::2
+echo '2001:DB8:aaaa::1 client' >> /etc/hosts
+echo '2001:DB8:aaaa::2 lb' >> /etc/hosts
+echo '2001:DB8:aaaa::3 server' >> /etc/hosts
+echo 'nameserver 8.8.8.8' >> /etc/resolv.conf
+sleep 2s
+sed -i '/exec/d' /etc/init/cilium-net-daemon.conf
+echo 'exec cilium -D daemon run -n f00d::c0a8:210b:0:0 -d eth1 -c "192.168.33.13:8500"' >> /etc/init/cilium-net-daemon.conf
+initctl start cilium-net-daemon
+sleep 10s
+cilium policy import /home/vagrant/go/src/github.com/noironetworks/cilium-net/examples/policy/default/default.policy
+docker network create --driver cilium --ipam-driver cilium cilium
+SCRIPT
+
+$lb = <<SCRIPT
+ip -6 a a 2001:DB8:aaaa::2/48 dev eth1
+ip -6 r a f00d::c0a8:210d:0:0/96 via 2001:db8:aaaa::3
+echo '2001:DB8:aaaa::1 client' >> /etc/hosts
+echo '2001:DB8:aaaa::2 lb' >> /etc/hosts
+echo '2001:DB8:aaaa::3 server' >> /etc/hosts
+echo 'nameserver 8.8.8.8' >> /etc/resolv.conf
+rm /sys/fs/bpf/tc/globals/cilium_lb_services
+rm /sys/fs/bpf/tc/globals/cilium_lb_state
+sleep 2s
+sed -i '/exec/d' /etc/init/cilium-net-daemon.conf
+echo 'script' >> /etc/init/cilium-net-daemon.conf
+echo 'cilium lb init 2001:db8:aaaa::2 f00d::' >> /etc/init/cilium-net-daemon.conf
+echo 'cilium -D daemon run -n f00d::c0a8:210c:0:0 --lb -d eth1' >> /etc/init/cilium-net-daemon.conf
+echo 'end script' >> /etc/init/cilium-net-daemon.conf
+initctl start cilium-net-daemon
+sleep 3s
+cilium policy import /home/vagrant/go/src/github.com/noironetworks/cilium-net/examples/policy/default/default.policy
+cilium lb c /sys/fs/bpf/tc/globals/cilium_lb_services 1
+cilium lb c /sys/fs/bpf/tc/globals/cilium_lb_state 2
+docker network create --driver cilium --ipam-driver cilium cilium
+SCRIPT
+
+$server = <<SCRIPT
+ip -6 a a 2001:db8:aaaa::3/48 dev eth1
+ip -6 r a f00d::c0a8:210b:0:0/96 via 2001:db8:aaaa::1
+echo '2001:DB8:aaaa::1 client' >> /etc/hosts
+echo '2001:DB8:aaaa::2 lb' >> /etc/hosts
+echo '2001:DB8:aaaa::3 server' >> /etc/hosts
+echo 'nameserver 8.8.8.8' >> /etc/resolv.conf
+rm /sys/fs/bpf/tc/globals/cilium_lb_services
+rm /sys/fs/bpf/tc/globals/cilium_lb_state
+sleep 2s
+sed -i '/exec/d' /etc/init/cilium-net-daemon.conf
+echo 'exec cilium -D daemon run -n f00d::c0a8:210d:0:0 -d eth1' >> /etc/init/cilium-net-daemon.conf
+initctl start cilium-net-daemon
+sleep 3s
+cilium policy import /home/vagrant/go/src/github.com/noironetworks/cilium-net/examples/policy/default/default.policy
+cilium lb c /sys/fs/bpf/tc/globals/cilium_lb_services 1
+cilium lb c /sys/fs/bpf/tc/globals/cilium_lb_state 2
+docker network create --driver cilium --ipam-driver cilium cilium
+SCRIPT
 
 Vagrant.configure(2) do |config|
     config.vm.provision "bootstrap", type: "shell", inline: $bootstrap
@@ -157,5 +209,23 @@ Vagrant.configure(2) do |config|
                 node.vm.network "private_network", ip: "#{$nfs_addr}"
             end
         end
+    end
+
+    config.vm.define "client", autostart: false do |client|
+        client.vm.network "private_network", ip: "192.168.33.11"
+        client.vm.hostname = "client"
+        config.vm.provision "client", type: "shell", privileged: true, run: "always", inline: $client
+    end
+
+    config.vm.define "lb", autostart: false do |lb|
+        lb.vm.network "private_network", ip: "192.168.33.12"
+        lb.vm.hostname = "lb"
+        config.vm.provision "lb", type: "shell", privileged: true, run: "always", inline: $lb
+    end
+
+    config.vm.define "server", autostart: false do |server|
+        server.vm.network "private_network", ip: "192.168.33.13"
+        server.vm.hostname = "server"
+        config.vm.provision "server", type: "shell", privileged: true, run: "always", inline: $server
     end
 end
